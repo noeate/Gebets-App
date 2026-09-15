@@ -113,6 +113,21 @@ body{
 .clock{font-size:23px;font-variant-numeric:tabular-nums;letter-spacing:.01em;min-width:86px}
 .clock.live{color:var(--brass)}
 
+/* ---------- Zeitig aufgewacht ---------- */
+.wake{padding:20px 0;border-bottom:1px solid var(--line)}
+.wake-btn{
+  display:flex;align-items:center;gap:11px;width:100%;
+  background:none;border:0;padding:0;cursor:pointer;color:var(--dim);
+  font:inherit;font-size:16px;text-align:left;
+  transition:color .15s ease;
+}
+.wake-btn:hover{color:var(--ink)}
+.wake-btn.on{color:var(--olive)}
+.wake-btn:focus-visible{outline:2px solid var(--brass);outline-offset:3px;border-radius:2px}
+.wake-btn.on .check-mark{background:var(--olive);border-color:var(--olive);color:#101A0E}
+.pip.early{background:var(--line-strong)}
+.pip.early.on{background:var(--brass)}
+
 /* ---------- Wachen ---------- */
 .watch{padding:24px 0;border-bottom:1px solid var(--line);position:relative}
 .watch.done{opacity:.96}
@@ -333,7 +348,7 @@ function load(){
     return d;
   }catch(e){ return {days:{}, running:null}; }
 }
-function save(){ store.set(KEY, JSON.stringify(data)); }
+function save(){ store.set(KEY, JSON.stringify(data)); if(typeof schedulePush === "function") schedulePush(); }
 
 /* ============ Datum & Zeit ============ */
 function keyOf(d){
@@ -360,7 +375,7 @@ function fmtLong(sec){
 
 /* ============ Tagesobjekt ============ */
 function blankDay(){
-  var d = {spontan:0, herz:0};
+  var d = {spontan:0, herz:0, wach:false};
   SLOTS.forEach(function(s){ d[s.id] = {timer:0, extra:0, done:false}; });
   return d;
 }
@@ -374,6 +389,7 @@ function getDay(k, create){
   SLOTS.forEach(function(s){ if(!d[s.id]) d[s.id] = {timer:0, extra:0, done:false}; });
   if(typeof d.spontan!=="number") d.spontan = 0;
   if(typeof d.herz!=="number") d.herz = 0;
+  if(typeof d.wach!=="boolean") d.wach = false;
   return d;
 }
 function lenOf(slotId){
@@ -529,32 +545,136 @@ function importJson(file){
       backupMsg = "Diese Datei enthält keine Gebetszeiten."; render(); return;
     }
     stopAll();
-    var added = 0, updated = 0, kept = 0;
-    Object.keys(incoming.days).forEach(function(k){
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
-      var inc = incoming.days[k];
-      if(!inc || typeof inc!=="object") return;
-      if(!data.days[k]){ data.days[k] = inc; added++; return; }
-      var here = dayTotal(getDay(k,false));
-      var there = dayTotal(normalize(inc));
-      if(there > here){ data.days[k] = inc; updated++; }
-      else kept++;
-    });
-    if(incoming.settings && typeof incoming.settings==="object" && !data.settings) data.settings = incoming.settings;
+    var r = mergeInto(incoming);
     save();
-    backupMsg = added+" Tage ergänzt, "+updated+" aktualisiert"+(kept?", "+kept+" unverändert":"")+".";
+    backupMsg = r.added+" Tage ergänzt, "+r.updated+" aktualisiert"+(r.kept?", "+r.kept+" unverändert":"")+".";
     render();
   };
   fr.onerror = function(){ backupMsg = "Die Datei konnte nicht gelesen werden."; render(); };
   fr.readAsText(file);
 }
+function mergeInto(remote){
+  var out = {added:0, updated:0, kept:0, changed:false};
+  if(!remote || typeof remote!=="object") return out;
+  var rd = remote.days || {};
+  Object.keys(rd).forEach(function(k){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+    var inc = normalize(rd[k] || {});
+    if(!data.days[k]){ data.days[k] = inc; out.added++; out.changed = true; return; }
+    var cur = getDay(k, true), touched = false;
+    SLOTS.forEach(function(sl){
+      if(inc[sl.id].timer > cur[sl.id].timer){ cur[sl.id].timer = inc[sl.id].timer; touched = true; }
+      if(inc[sl.id].extra > cur[sl.id].extra){ cur[sl.id].extra = inc[sl.id].extra; touched = true; }
+      if(inc[sl.id].done && !cur[sl.id].done){ cur[sl.id].done = true; touched = true; }
+    });
+    if(inc.spontan > cur.spontan){ cur.spontan = inc.spontan; touched = true; }
+    if(inc.herz > cur.herz){ cur.herz = inc.herz; touched = true; }
+    if(touched){ out.updated++; out.changed = true; } else out.kept++;
+  });
+  var rAt = typeof remote.settingsAt === "number" ? remote.settingsAt : 0;
+  var lAt = typeof data.settingsAt === "number" ? data.settingsAt : 0;
+  if(remote.settings && typeof remote.settings === "object" && rAt > lAt){
+    data.settings = remote.settings;
+    data.settingsAt = rAt;
+    out.changed = true;
+  }
+  return out;
+}
+
 function normalize(d){
-  var o = {spontan: (typeof d.spontan==="number"?d.spontan:0), herz: (typeof d.herz==="number"?d.herz:0)};
+  var o = {spontan: (typeof d.spontan==="number"?d.spontan:0), herz: (typeof d.herz==="number"?d.herz:0), wach: !!d.wach};
   SLOTS.forEach(function(s){
     var x = d[s.id] || {};
     o[s.id] = {timer:(typeof x.timer==="number"?x.timer:0), extra:(typeof x.extra==="number"?x.extra:0), done:!!x.done};
   });
   return o;
+}
+
+/* ============ Synchronisierung ============ */
+var SYNC_KEY = "gebetstimer.sync";
+var SYNC_APP = "gebet";
+var DEFAULT_URL = "https://gebet-sync.noelatesgmx-de.workers.dev/";
+var sync = loadSync();
+var syncMsg = "", syncBusy = false, pushTimer = null, lastPush = 0;
+
+function loadSync(){
+  try{
+    var raw = store.get(SYNC_KEY);
+    if(raw){
+      var o = JSON.parse(raw);
+      if(o && typeof o === "object"){
+        return {url:o.url||DEFAULT_URL, token:o.token||"", on:!!o.on, last:o.last||0};
+      }
+    }
+  }catch(e){}
+  return {url:DEFAULT_URL, token:"", on:false, last:0};
+}
+function saveSync(){ store.set(SYNC_KEY, JSON.stringify(sync)); }
+function touchSettings(){ data.settingsAt = Date.now(); }
+function clockNow(){
+  var d = new Date();
+  return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+}
+function syncEndpoint(){
+  return String(sync.url||"").replace(/\/+$/,"") + "/?app=" + SYNC_APP;
+}
+
+function syncNow(quiet){
+  if(!sync.on || !sync.url || !sync.token){ return; }
+  if(syncBusy) return;
+  if(typeof fetch !== "function"){ syncMsg = "Dieser Browser kann nicht abgleichen."; render(); return; }
+  syncBusy = true;
+  lastPush = Date.now();
+  if(!quiet){ syncMsg = "Abgleich läuft …"; render(); }
+  commit();
+  var url = syncEndpoint();
+  fetch(url, {headers:{"X-Token": sync.token}})
+    .then(function(r){
+      if(r.status === 401) throw new Error("Kennwort stimmt nicht.");
+      if(!r.ok) throw new Error("Fehler " + r.status);
+      return r.json();
+    })
+    .then(function(res){
+      mergeInto(res && res.data);
+      save();
+      return fetch(url, {
+        method: "POST",
+        headers: {"X-Token": sync.token, "Content-Type": "application/json"},
+        body: JSON.stringify(data)
+      });
+    })
+    .then(function(r){
+      if(!r.ok) throw new Error("Speichern fehlgeschlagen (" + r.status + ")");
+      sync.last = Date.now();
+      saveSync();
+      syncBusy = false;
+      syncMsg = "Abgeglichen um " + clockNow() + ".";
+      render();
+    })
+    .catch(function(e){
+      syncBusy = false;
+      syncMsg = "Abgleich fehlgeschlagen – " + ((e && e.message) || "unbekannter Fehler");
+      render();
+    });
+}
+
+function schedulePush(){
+  if(!sync.on || !sync.token) return;
+  if(Date.now() - lastPush > 120000){ syncNow(true); return; }
+  if(pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(function(){ pushTimer = null; syncNow(true); }, 8000);
+}
+function pushNow(){
+  if(!sync.on || !sync.token || typeof fetch !== "function") return;
+  commit();
+  try{
+    fetch(syncEndpoint(), {
+      method: "POST",
+      headers: {"X-Token": sync.token, "Content-Type": "application/json"},
+      body: JSON.stringify(data),
+      keepalive: true
+    });
+  }catch(e){}
 }
 
 /* ============ Statistik ============ */
@@ -727,6 +847,20 @@ function viewStart(){
         +   '</div>'
         + '</div>'
 
+        + '<div class="set-block">'
+        +   '<div class="set-label">Synchronisierung</div>'
+        +   '<input class="set-input" type="url" data-field="sync-url" '
+        +     'value="'+esc(sync.url)+'" placeholder="Adresse des Dienstes" aria-label="Adresse">'
+        +   '<input class="set-input sub" type="password" data-field="sync-token" '
+        +     'value="'+esc(sync.token)+'" placeholder="Kennwort" aria-label="Kennwort" autocomplete="off">'
+        +   '<div class="row tight" style="padding-top:4px">'
+        +     '<button class="btn small" data-act="syncnow">'+(sync.on ? "Jetzt abgleichen" : "Verbinden")+'</button>'
+        +     (sync.on ? '<button class="btn small" data-act="syncoff">Trennen</button>' : '')
+        +   '</div>'
+        +   '<div class="set-msg">'+(syncMsg ? esc(syncMsg)
+        :       (sync.on ? "Verbunden." : "Nicht verbunden – die Zeiten bleiben nur auf diesem Gerät."))+'</div>'
+        + '</div>'
+
         + '<div class="set-block" style="border-bottom:0">'
         +   '<div class="set-label">Sicherung</div>'
         +   '<div class="row tight" style="padding-top:4px">'
@@ -761,7 +895,13 @@ function viewHeute(){
   var html = ''
   + '<h1 class="page-title">'+longDate(new Date())+'</h1>'
   + '<section class="day-verse">' + verseHtml(v) + '</section>'
-  + hourHtml(sec, "von "+goalLabel());
+  + hourHtml(sec, "von "+goalLabel())
+  + '<section class="wake">'
+  +   '<button class="wake-btn'+(d.wach?" on":"")+'" data-act="wach" aria-pressed="'+(d.wach?"true":"false")+'">'
+  +     '<span class="check-mark">'+CHECK+'</span>'
+  +     '<span>Zeitig aufgewacht?</span>'
+  +   '</button>'
+  + '</section>';
 
   SLOTS.forEach(function(s){
     var x = d[s.id];
@@ -818,7 +958,7 @@ function viewHeute(){
 function viewVerlauf(){
   var keys = Object.keys(data.days).filter(function(k){
     var d = getDay(k,false);
-    return dayTotal(d)>0 || d.herz>0;
+    return dayTotal(d)>0 || d.herz>0 || d.wach;
   }).sort().reverse();
 
   if(!keys.length){
@@ -857,6 +997,7 @@ function viewVerlauf(){
       + '<div class="hist-date">'
       +   '<div class="hist-day">'+shortDate(dt)+'</div>'
       +   '<div class="hist-meta">'
+      +     '<span class="pip early'+(d.wach?" on":"")+'" title="Zeitig aufgewacht"></span>'
       +     SLOTS.map(function(s){ return '<span class="pip'+(d[s.id].done?" on":"")+'" title="'+nameOf(s.id)+'"></span>'; }).join("")
       +     '<span>'+(d.spontan>0 ? "+ "+fmt(d.spontan)+" außer der Reihe" : "")+'</span>'
       +   '</div>'
@@ -904,19 +1045,32 @@ document.addEventListener("click", function(e){
     var sl = slot, dd2 = +b.getAttribute("data-d");
     var cur = Math.round(lenOf(sl)/LEN_STEP)*LEN_STEP;
     setLen(sl, cur + dd2*LEN_STEP);
-    save(); render(); return;
+    touchSettings(); save(); render(); return;
   }
   if(act==="goal"){
     var gd = +b.getAttribute("data-d");
     var gc = Math.round(goalOf()/GOAL_STEP)*GOAL_STEP;
     if(!data.settings) data.settings = {};
     data.settings.goal = Math.max(GOAL_MIN, Math.min(GOAL_MAX, gc + gd*GOAL_STEP));
-    save(); render(); return;
+    touchSettings(); save(); render(); return;
   }
   if(act==="lenreset"){
     data.settings = {};
+    touchSettings();
     backupMsg = "";
     save(); render(); return;
+  }
+  if(act==="syncnow"){
+    if(!sync.url || !sync.token){
+      syncMsg = "Bitte Adresse und Kennwort eintragen.";
+      render(); return;
+    }
+    sync.on = true; saveSync(); syncNow(false); return;
+  }
+  if(act==="syncoff"){
+    sync.on = false; saveSync();
+    syncMsg = "Getrennt. Die Daten auf diesem Gerät bleiben erhalten.";
+    render(); return;
   }
   if(act==="export"){ exportJson(); return; }
   if(act==="import"){
@@ -925,6 +1079,11 @@ document.addEventListener("click", function(e){
     return;
   }
 
+  if(act==="wach"){
+    var dw = getDay(todayKey(), true);
+    dw.wach = !dw.wach;
+    save(); render(); return;
+  }
   if(act==="check"){
     var d = getDay(todayKey(), true), x = d[slot];
     if(isRunning("timer", slot) || isRunning("extra", slot)) stopAll();
@@ -944,9 +1103,12 @@ document.addEventListener("input", function(e){
   var el = e.target.closest ? e.target.closest("[data-field]") : null;
   if(!el) return;
   var f = el.getAttribute("data-field"), sl = el.getAttribute("data-slot");
+  if(f === "sync-url"){ sync.url = el.value.trim(); saveSync(); return; }
+  if(f === "sync-token"){ sync.token = el.value; saveSync(); return; }
   if(!data.settings) data.settings = {};
   if(!data.settings[f]) data.settings[f] = {};
   data.settings[f][sl] = el.value;
+  touchSettings();
   save();
 });
 
@@ -970,11 +1132,15 @@ setInterval(function(){
   render();
 }, 1000);
 
-document.addEventListener("visibilitychange", function(){ if(document.hidden){ commit(); save(); } });
-window.addEventListener("pagehide", function(){ commit(); save(); });
+document.addEventListener("visibilitychange", function(){
+  if(document.hidden){ commit(); save(); pushNow(); }
+  else if(sync.on){ syncNow(true); }
+});
+window.addEventListener("pagehide", function(){ commit(); save(); pushNow(); });
 window.addEventListener("beforeunload", function(){ commit(); save(); });
 
 render();
+if(sync.on) syncNow(true);
 })();
 </script>
 </body>

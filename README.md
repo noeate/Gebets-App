@@ -3,12 +3,12 @@
 Gebetstimer: drei Gebetszeiten, Stoppuhren, Tagesvers, Wochen- und
 Monatsübersicht. Ziel ist eine Stunde Gebet am Tag.
 
-Unter "Einstellungen" auf der Startseite lassen sich Namen und Themen der
-drei Gebetszeiten ändern, die Dauer der Timer und das Tagesziel anpassen
-sowie alle Daten als JSON sichern und wieder einlesen.
+Unter "Einstellungen" auf der Startseite: Namen und Themen der drei
+Gebetszeiten ändern, Dauer und Tagesziel anpassen, Daten als JSON
+sichern und einlesen sowie die Geräte-Synchronisierung einrichten.
 
 Eine einzige Datei (`index.html`), kein Build, keine Abhängigkeiten.
-Die Gebetszeiten werden nur lokal im Browser gespeichert.
+Ohne Synchronisierung bleiben die Daten nur im Browser des Geräts.
 
 ## Auf GitHub Pages veröffentlichen
 
