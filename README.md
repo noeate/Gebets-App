@@ -21,4 +21,4 @@ Ohne Synchronisierung bleiben die Gebetszeiten nur im Browser des Geräts.
 
 Nach einem Update einmal mit Strg+F5 neu laden, damit die neue Fassung
 den zwischengespeicherten Stand ablöst. Die Kennung in `sw.js`
-(`gebetstimer-v1`) wird bei künftigen Änderungen hochgezählt.
+(`gebetstimer-v2`) wird bei künftigen Änderungen hochgezählt.

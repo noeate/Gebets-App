@@ -106,6 +106,9 @@ body{
 .btn.primary{background:var(--brass);border-color:var(--brass);color:#14100A;font-weight:500}
 .btn.primary:hover{background:#D8B570;border-color:#D8B570;color:#14100A}
 .btn.small{padding:7px 13px;font-size:13.5px}
+.btn.tiny{padding:4px 9px;font-size:12px;border-color:var(--line);color:var(--dim)}
+.btn.tiny:hover{border-color:var(--brass);color:var(--brass)}
+.adjust{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
 .btn.running{border-color:var(--brass);color:var(--brass)}
 .btn.check{border-color:var(--line-strong)}
 .btn.check.on{border-color:var(--olive);color:var(--olive)}
@@ -747,6 +750,16 @@ function verseOfDay(dkey){
 var CHECK = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.4 4.6 9 10 3"/></svg>';
 var HEART = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.7-9.6-9.2C.8 8.3 2.3 4.6 5.8 3.9c2.1-.4 4.1.5 5.2 2.2l1 1.5 1-1.5c1.1-1.7 3.1-2.6 5.2-2.2 3.5.7 5 4.4 3.4 7.9C19.5 16.3 12 21 12 21z"/></svg>';
 
+function adjustHtml(kind, slotId, value){
+  if(value <= 0) return '';
+  var sl = slotId ? ' data-slot="'+slotId+'"' : '';
+  return '<span class="adjust">'
+    + '<button class="btn tiny" data-act="minus" data-kind="'+kind+'"'+sl+' title="Eine Minute abziehen">&minus;1&#8239;Min</button>'
+    + '<button class="btn tiny" data-act="plus" data-kind="'+kind+'"'+sl+' title="Eine Minute hinzufügen">+1&#8239;Min</button>'
+    + '<button class="btn tiny" data-act="zero" data-kind="'+kind+'"'+sl+' title="Auf null setzen">Zur\u00fccksetzen</button>'
+    + '</span>';
+}
+
 /* ============ Seiten ============ */
 function viewStart(){
   var k = todayKey();
@@ -784,6 +797,7 @@ function viewStart(){
   +   '<div class="lbl">Einfach beten – die Zeit läuft auf den heutigen Tag.</div>'
   +   '<div class="clock'+(spRun?" live":"")+'">'+fmt(spVal)+'</div>'
   +   '<button class="btn small'+(spRun?" running":"")+'" data-act="spontan">'+(spRun?"Anhalten":"Starten")+'</button>'
+  +   adjustHtml("spontan", null, spVal)
   + '</section>'
 
   + '<section class="stats">'
@@ -919,11 +933,13 @@ function viewHeute(){
       +   '<button class="btn small check'+(x.done?" on":"")+'" data-act="check" data-slot="'+s.id+'">'
       +     (x.done ? "Abgehakt" : "Ohne Timer abhaken")
       +   '</button>'
+      +   adjustHtml("timer", s.id, tVal)
       + '</div>'
       + '<div class="stop">'
       +   '<div class="lbl">Länger beten – Stoppuhr</div>'
       +   '<div class="clock'+(eRun?" live":"")+'">'+fmt(eVal)+'</div>'
       +   '<button class="btn small'+(eRun?" running":"")+'" data-act="extra" data-slot="'+s.id+'">'+(eRun?"Anhalten":"Starten")+'</button>'
+      +   adjustHtml("extra", s.id, eVal)
       + '</div>'
       + (total>0 ? '<div class="sum">Gesamt in dieser Gebetszeit: <b>'+fmt(total)+'</b></div>' : '')
       + '</section>';
@@ -935,6 +951,7 @@ function viewHeute(){
     + '<div class="lbl">Weiteres Gebet außer der Reihe</div>'
     + '<div class="clock'+(spRun?" live":"")+'">'+fmt(spVal)+'</div>'
     + '<button class="btn small'+(spRun?" running":"")+'" data-act="spontan">'+(spRun?"Anhalten":"Starten")+'</button>'
+    + adjustHtml("spontan", null, spVal)
     + '</section>';
 
   var notes = ["","Zerstreut","Mit halbem Herzen","Aufmerksam","Von Herzen","Ganz bei ihm"];
@@ -1072,6 +1089,27 @@ document.addEventListener("click", function(e){
     var inp = document.getElementById("importfile");
     if(inp){ inp.value = ""; inp.click(); }
     return;
+  }
+
+  if(act==="minus" || act==="plus" || act==="zero"){
+    var kd = b.getAttribute("data-kind"), sk = slot;
+    if(isRunning(kd, sk)) stopAll();
+    var dy = getDay(todayKey(), true);
+    var cur = (kd==="spontan") ? (dy.spontan||0) : (dy[sk][kd]||0);
+    var next = act==="zero" ? 0 : (act==="minus" ? cur-60 : cur+60);
+    if(next < 0) next = 0;
+    if(kd==="timer"){
+      var lim = lenOf(sk);
+      if(next > lim) next = lim;
+      dy[sk].timer = next;
+      if(next < lim) dy[sk].done = false;
+      else dy[sk].done = true;
+    } else if(kd==="extra"){
+      dy[sk].extra = next;
+    } else {
+      dy.spontan = next;
+    }
+    save(); render(); return;
   }
 
   if(act==="check"){
