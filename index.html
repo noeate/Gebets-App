@@ -113,21 +113,6 @@ body{
 .clock{font-size:23px;font-variant-numeric:tabular-nums;letter-spacing:.01em;min-width:86px}
 .clock.live{color:var(--brass)}
 
-/* ---------- Zeitig aufgewacht ---------- */
-.wake{padding:20px 0;border-bottom:1px solid var(--line)}
-.wake-btn{
-  display:flex;align-items:center;gap:11px;width:100%;
-  background:none;border:0;padding:0;cursor:pointer;color:var(--dim);
-  font:inherit;font-size:16px;text-align:left;
-  transition:color .15s ease;
-}
-.wake-btn:hover{color:var(--ink)}
-.wake-btn.on{color:var(--olive)}
-.wake-btn:focus-visible{outline:2px solid var(--brass);outline-offset:3px;border-radius:2px}
-.wake-btn.on .check-mark{background:var(--olive);border-color:var(--olive);color:#101A0E}
-.pip.early{background:var(--line-strong)}
-.pip.early.on{background:var(--brass)}
-
 /* ---------- Wachen ---------- */
 .watch{padding:24px 0;border-bottom:1px solid var(--line);position:relative}
 .watch.done{opacity:.96}
@@ -375,7 +360,7 @@ function fmtLong(sec){
 
 /* ============ Tagesobjekt ============ */
 function blankDay(){
-  var d = {spontan:0, herz:0, wach:false};
+  var d = {spontan:0, herz:0};
   SLOTS.forEach(function(s){ d[s.id] = {timer:0, extra:0, done:false}; });
   return d;
 }
@@ -389,7 +374,6 @@ function getDay(k, create){
   SLOTS.forEach(function(s){ if(!d[s.id]) d[s.id] = {timer:0, extra:0, done:false}; });
   if(typeof d.spontan!=="number") d.spontan = 0;
   if(typeof d.herz!=="number") d.herz = 0;
-  if(typeof d.wach!=="boolean") d.wach = false;
   return d;
 }
 function lenOf(slotId){
@@ -582,7 +566,7 @@ function mergeInto(remote){
 }
 
 function normalize(d){
-  var o = {spontan: (typeof d.spontan==="number"?d.spontan:0), herz: (typeof d.herz==="number"?d.herz:0), wach: !!d.wach};
+  var o = {spontan: (typeof d.spontan==="number"?d.spontan:0), herz: (typeof d.herz==="number"?d.herz:0)};
   SLOTS.forEach(function(s){
     var x = d[s.id] || {};
     o[s.id] = {timer:(typeof x.timer==="number"?x.timer:0), extra:(typeof x.extra==="number"?x.extra:0), done:!!x.done};
@@ -895,13 +879,7 @@ function viewHeute(){
   var html = ''
   + '<h1 class="page-title">'+longDate(new Date())+'</h1>'
   + '<section class="day-verse">' + verseHtml(v) + '</section>'
-  + hourHtml(sec, "von "+goalLabel())
-  + '<section class="wake">'
-  +   '<button class="wake-btn'+(d.wach?" on":"")+'" data-act="wach" aria-pressed="'+(d.wach?"true":"false")+'">'
-  +     '<span class="check-mark">'+CHECK+'</span>'
-  +     '<span>Zeitig aufgewacht?</span>'
-  +   '</button>'
-  + '</section>';
+  + hourHtml(sec, "von "+goalLabel());
 
   SLOTS.forEach(function(s){
     var x = d[s.id];
@@ -958,7 +936,7 @@ function viewHeute(){
 function viewVerlauf(){
   var keys = Object.keys(data.days).filter(function(k){
     var d = getDay(k,false);
-    return dayTotal(d)>0 || d.herz>0 || d.wach;
+    return dayTotal(d)>0 || d.herz>0;
   }).sort().reverse();
 
   if(!keys.length){
@@ -997,7 +975,6 @@ function viewVerlauf(){
       + '<div class="hist-date">'
       +   '<div class="hist-day">'+shortDate(dt)+'</div>'
       +   '<div class="hist-meta">'
-      +     '<span class="pip early'+(d.wach?" on":"")+'" title="Zeitig aufgewacht"></span>'
       +     SLOTS.map(function(s){ return '<span class="pip'+(d[s.id].done?" on":"")+'" title="'+nameOf(s.id)+'"></span>'; }).join("")
       +     '<span>'+(d.spontan>0 ? "+ "+fmt(d.spontan)+" außer der Reihe" : "")+'</span>'
       +   '</div>'
@@ -1079,11 +1056,6 @@ document.addEventListener("click", function(e){
     return;
   }
 
-  if(act==="wach"){
-    var dw = getDay(todayKey(), true);
-    dw.wach = !dw.wach;
-    save(); render(); return;
-  }
   if(act==="check"){
     var d = getDay(todayKey(), true), x = d[slot];
     if(isRunning("timer", slot) || isRunning("extra", slot)) stopAll();
