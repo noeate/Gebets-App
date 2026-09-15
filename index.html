@@ -27,6 +27,8 @@
   --olive:#7FA06B;
   --olive-dim:rgba(127,160,107,.16);
   --radius:3px;
+  --card:#161F2E;
+  --r-card:5px;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -107,15 +109,22 @@ body{
 /* ---------- Spontan ---------- */
 .spontan{
   display:flex;align-items:center;gap:16px;flex-wrap:wrap;
-  padding:20px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  padding:18px 21px;margin:14px 0;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);
 }
 .spontan .lbl{font-size:14.5px;color:var(--dim);flex:1 1 180px}
 .clock{font-size:23px;font-variant-numeric:tabular-nums;letter-spacing:.01em;min-width:86px}
 .clock.live{color:var(--brass)}
 
 /* ---------- Wachen ---------- */
-.watch{padding:24px 0;border-bottom:1px solid var(--line);position:relative}
-.watch.done{opacity:.96}
+.watch{
+  padding:20px 21px;margin:10px 0;position:relative;overflow:hidden;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);
+}
+.watch.done{border-color:rgba(127,160,107,.32)}
+.watch.done::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--olive);
+}
 .watch-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .watch-name{font-family:"EB Garamond",Georgia,serif;font-size:21px;letter-spacing:.01em}
 .watch.done .watch-name{color:var(--olive)}
@@ -154,8 +163,11 @@ body{
 .heart-note{font-size:13px;color:var(--dim);margin-top:10px;min-height:20px}
 
 /* ---------- Statistik ---------- */
-.stats{padding:26px 0 0}
-.stat{padding:20px 0;border-bottom:1px solid var(--line)}
+.stats{padding:20px 0 0}
+.stat{
+  padding:18px 21px;margin:10px 0;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-card);
+}
 .stat-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
 .stat-name{font-family:"EB Garamond",Georgia,serif;font-size:19px}
 .stat-val{font-size:14.5px;font-variant-numeric:tabular-nums}
