@@ -195,10 +195,19 @@ body{
 .stat-sub{font-size:13px;color:var(--dim);margin-top:12px}
 
 /* ---------- Verlauf ---------- */
+.jump{padding:26px 0 4px;border-top:1px solid var(--line);margin-top:22px}
+.jump-lbl{display:block;font-size:12px;color:var(--dim);letter-spacing:.02em;padding-bottom:9px}
+.jump-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.jump-row .set-input{flex:1 1 170px;margin-bottom:0}
+.hist-hint{font-size:13px;color:var(--dim);margin:14px 0 2px}
 .hist-row{
   display:flex;align-items:center;gap:14px;
   padding:15px 0;border-bottom:1px solid var(--line);
+  text-decoration:none;color:inherit;transition:border-color .15s ease;
 }
+.hist-row:hover{border-bottom-color:var(--brass)}
+.hist-row:hover .hist-day{color:var(--brass)}
+.hist-row:focus-visible{outline:2px solid var(--brass);outline-offset:3px;border-radius:2px}
 .hist-date{flex:1 1 auto;min-width:0}
 .hist-day{font-size:15px}
 .hist-meta{font-size:12.5px;color:var(--dim);margin-top:2px;display:flex;gap:7px;align-items:center}
@@ -361,6 +370,7 @@ function keyOf(d){
   return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
 function todayKey(){ return keyOf(new Date()); }
+function yesterdayKey(){ var d = new Date(); d.setDate(d.getDate()-1); return keyOf(d); }
 function dateFromKey(k){ var p=k.split("-"); return new Date(+p[0], +p[1]-1, +p[2]); }
 function longDate(d){ return WD[d.getDay()]+", "+d.getDate()+". "+MON[d.getMonth()]+" "+d.getFullYear(); }
 function shortDate(d){ return WD_S[d.getDay()]+", "+d.getDate()+"."+(d.getMonth()+1)+"."; }
@@ -750,14 +760,21 @@ function verseOfDay(dkey){
 var CHECK = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6.4 4.6 9 10 3"/></svg>';
 var HEART = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.7-9.6-9.2C.8 8.3 2.3 4.6 5.8 3.9c2.1-.4 4.1.5 5.2 2.2l1 1.5 1-1.5c1.1-1.7 3.1-2.6 5.2-2.2 3.5.7 5 4.4 3.4 7.9C19.5 16.3 12 21 12 21z"/></svg>';
 
-function adjustHtml(kind, slotId, value){
-  if(value <= 0) return '';
+function adjustHtml(kind, slotId, value, dayKey, wide){
+  if(value <= 0 && !wide) return '';
   var sl = slotId ? ' data-slot="'+slotId+'"' : '';
-  return '<span class="adjust">'
-    + '<button class="btn tiny" data-act="minus" data-kind="'+kind+'"'+sl+' title="Eine Minute abziehen">&minus;1&#8239;Min</button>'
-    + '<button class="btn tiny" data-act="plus" data-kind="'+kind+'"'+sl+' title="Eine Minute hinzufügen">+1&#8239;Min</button>'
-    + '<button class="btn tiny" data-act="zero" data-kind="'+kind+'"'+sl+' title="Auf null setzen">Zur\u00fccksetzen</button>'
-    + '</span>';
+  var dk = dayKey ? ' data-day="'+dayKey+'"' : '';
+  function b(act, step, label, title){
+    return '<button class="btn tiny" data-act="'+act+'" data-kind="'+kind+'"'
+      + (step ? ' data-step="'+step+'"' : '') + sl + dk + ' title="'+title+'">'+label+'</button>';
+  }
+  var html = '<span class="adjust">';
+  if(wide) html += b("minus", 5, "&minus;5", "F\u00fcnf Minuten abziehen");
+  html += b("minus", 1, "&minus;1&#8239;Min", "Eine Minute abziehen");
+  html += b("plus", 1, "+1&#8239;Min", "Eine Minute hinzuf\u00fcgen");
+  if(wide) html += b("plus", 5, "+5", "F\u00fcnf Minuten hinzuf\u00fcgen");
+  if(value > 0) html += b("zero", 0, "Zur\u00fccksetzen", "Auf null setzen");
+  return html + '</span>';
 }
 
 /* ============ Seiten ============ */
@@ -968,6 +985,63 @@ function viewHeute(){
   return html;
 }
 
+function viewTag(k){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(k) || k > todayKey()) return viewVerlauf();
+  if(k === todayKey()) return viewHeute();
+
+  var d = getDay(k, false);
+  var dt = dateFromKey(k);
+  var sec = totalFor(k);
+  var v = verseOfDay(k);
+
+  var html = ''
+  + '<h1 class="page-title">'+longDate(dt)+'</h1>'
+  + '<section class="day-verse">' + verseHtml(v) + '</section>'
+  + hourHtml(sec, "von "+goalLabel());
+
+  SLOTS.forEach(function(sl){
+    var x = d[sl.id], len = lenOf(sl.id);
+    var total = (x.done ? Math.max(x.timer||0, len) : (x.timer||0)) + (x.extra||0);
+    html += '<section class="watch'+(x.done?" done":"")+'">'
+      + '<div class="watch-head"><span class="check-mark">'+CHECK+'</span>'
+      +   '<span class="watch-name">'+nameOf(sl.id)+'</span></div>'
+      + '<div class="watch-focus">'+focusOf(sl.id)+'</div>'
+      + '<div class="watch-body">'
+      +   '<div class="clock">'+fmt(x.timer||0)+'</div>'
+      +   '<button class="btn small check'+(x.done?" on":"")+'" data-act="check" data-slot="'+sl.id+'" data-day="'+k+'">'
+      +     (x.done ? "Abgehakt" : "Abhaken")
+      +   '</button>'
+      +   adjustHtml("timer", sl.id, x.timer||0, k, true)
+      + '</div>'
+      + '<div class="stop">'
+      +   '<div class="lbl">Zusätzlich gebetet</div>'
+      +   '<div class="clock">'+fmt(x.extra||0)+'</div>'
+      +   adjustHtml("extra", sl.id, x.extra||0, k, true)
+      + '</div>'
+      + (total>0 ? '<div class="sum">Gesamt in dieser Gebetszeit: <b>'+fmt(total)+'</b></div>' : '')
+      + '</section>';
+  });
+
+  html += '<section class="spontan">'
+    + '<div class="lbl">Weiteres Gebet außer der Reihe</div>'
+    + '<div class="clock">'+fmt(d.spontan||0)+'</div>'
+    + adjustHtml("spontan", null, d.spontan||0, k, true)
+    + '</section>';
+
+  var notes = ["","Zerstreut","Mit halbem Herzen","Aufmerksam","Von Herzen","Ganz bei ihm"];
+  html += '<section class="heart-block">'
+    + '<p class="heart-q">Mit wie viel Herz wurde an diesem Tag gebetet?</p>'
+    + '<div class="hearts">'
+    + [1,2,3,4,5].map(function(n){
+        return '<button class="heart'+(d.herz>=n?" on":"")+'" data-act="herz" data-n="'+n+'" data-day="'+k+'" aria-label="'+n+' von 5" title="'+notes[n]+'">'+HEART+'</button>';
+      }).join("")
+    + '</div>'
+    + '<div class="heart-note">'+(d.herz?notes[d.herz]:"Noch nicht eingetragen")+'</div>'
+    + '</section>'
+    + '<a class="back" href="#/verlauf" data-nav>Zurück zu allen Tagen</a>';
+  return html;
+}
+
 function viewVerlauf(){
   var keys = Object.keys(data.days).filter(function(k){
     var d = getDay(k,false);
@@ -978,6 +1052,13 @@ function viewVerlauf(){
     return '<h1 class="page-title">Alle Tage</h1>'
       + '<p class="empty">Hier stehen deine Gebetszeiten, sobald du den ersten Timer gestartet hast.</p>'
       + '<div class="row tight" style="padding-top:8px"><a class="btn primary" href="#/heute" data-nav>Zum heutigen Gebet</a></div>'
+      + '<section class="jump">'
+    + '<label class="jump-lbl" for="dateJump">Tag nachtragen</label>'
+    + '<div class="jump-row">'
+    +   '<input class="set-input" type="date" id="dateJump" max="'+todayKey()+'" value="'+yesterdayKey()+'">'
+    +   '<button class="btn small" data-act="opendate">Öffnen</button>'
+    + '</div>'
+    + '</section>'
       + '<a class="back" href="#/" data-nav>Zurück zur Startseite</a>';
   }
 
@@ -992,7 +1073,15 @@ function viewVerlauf(){
   });
 
   var html = '<h1 class="page-title">Alle Tage</h1>'
-    + '<div class="total-line">Insgesamt <b>'+fmtLong(sum)+'</b> an '+keys.length+' Tagen · '+goalDays+' mal das Tagesziel erreicht</div>';
+    + '<div class="total-line">Insgesamt <b>'+fmtLong(sum)+'</b> an '+keys.length+' Tagen · '+goalDays+' mal das Tagesziel erreicht</div>'
+    + '<p class="hist-hint">Auf einen Tag tippen, um ihn nachzutragen.</p>'
+    + '<section class="jump">'
+    + '<label class="jump-lbl" for="dateJump">Tag nachtragen</label>'
+    + '<div class="jump-row">'
+    +   '<input class="set-input" type="date" id="dateJump" max="'+todayKey()+'" value="'+yesterdayKey()+'">'
+    +   '<button class="btn small" data-act="opendate">Öffnen</button>'
+    + '</div>'
+    + '</section>';
 
   var lastMonth = null;
   keys.forEach(function(k){
@@ -1006,7 +1095,7 @@ function viewVerlauf(){
         +   s.goal+'&#8239;× das Tagesziel erreicht</div>'
         + '</section>';
     }
-    html += '<div class="hist-row">'
+    html += '<a class="hist-row" href="#/tag/'+k+'" data-nav>'
       + '<div class="hist-date">'
       +   '<div class="hist-day">'+shortDate(dt)+'</div>'
       +   '<div class="hist-meta">'
@@ -1018,7 +1107,7 @@ function viewVerlauf(){
       + '<div class="hist-time'+(t>=goalOf()?" goal":"")+'">'+fmt(t)
       +   '<span class="goal-mark'+(t>=goalOf()?"":" off")+'" title="Tagesziel erreicht">'+CHECK+'</span>'
       + '</div>'
-      + '</div>';
+      + '</a>';
   });
   html += '<a class="back" href="#/" data-nav>Zurück zur Startseite</a>';
   return html;
@@ -1031,6 +1120,7 @@ function route(){
   var h = location.hash.replace(/^#\/?/, "");
   if(h.indexOf("heute")===0) return "heute";
   if(h.indexOf("verlauf")===0) return "verlauf";
+  if(h.indexOf("tag/")===0) return "tag";
   return "start";
 }
 function currentDateKey(){ return todayKey(); }
@@ -1038,7 +1128,10 @@ function currentDateKey(){ return todayKey(); }
 function render(){
   var r = route();
   document.getElementById("topdate").textContent = shortDate(new Date());
-  app.innerHTML = r==="heute" ? viewHeute() : r==="verlauf" ? viewVerlauf() : viewStart();
+  app.innerHTML = r==="heute" ? viewHeute()
+    : r==="verlauf" ? viewVerlauf()
+    : r==="tag" ? viewTag(location.hash.replace(/^#\/?tag\//, ""))
+    : viewStart();
 }
 
 document.addEventListener("click", function(e){
@@ -1052,6 +1145,12 @@ document.addEventListener("click", function(e){
   if(act==="timer" || act==="extra"){ start(act, slot); return; }
   if(act==="spontan"){ start("spontan", null); return; }
 
+  if(act==="opendate"){
+    var fld = document.getElementById("dateJump");
+    var val = fld && fld.value;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(val) && val <= todayKey()) location.hash = "#/tag/"+val;
+    return;
+  }
   if(act==="settings"){ settingsOpen = !settingsOpen; render(); return; }
   if(act==="len"){
     var sl = slot, dd2 = +b.getAttribute("data-d");
@@ -1093,10 +1192,12 @@ document.addEventListener("click", function(e){
 
   if(act==="minus" || act==="plus" || act==="zero"){
     var kd = b.getAttribute("data-kind"), sk = slot;
-    if(isRunning(kd, sk)) stopAll();
-    var dy = getDay(todayKey(), true);
+    var dk = b.getAttribute("data-day") || todayKey();
+    var step = (+b.getAttribute("data-step") || 1) * 60;
+    if(dk === todayKey() && isRunning(kd, sk)) stopAll();
+    var dy = getDay(dk, true);
     var cur = (kd==="spontan") ? (dy.spontan||0) : (dy[sk][kd]||0);
-    var next = act==="zero" ? 0 : (act==="minus" ? cur-60 : cur+60);
+    var next = act==="zero" ? 0 : (act==="minus" ? cur-step : cur+step);
     if(next < 0) next = 0;
     if(kd==="timer"){
       var lim = lenOf(sk);
@@ -1113,15 +1214,17 @@ document.addEventListener("click", function(e){
   }
 
   if(act==="check"){
-    var d = getDay(todayKey(), true), x = d[slot];
-    if(isRunning("timer", slot) || isRunning("extra", slot)) stopAll();
+    var ck = b.getAttribute("data-day") || todayKey();
+    var d = getDay(ck, true), x = d[slot];
+    if(ck === todayKey() && (isRunning("timer", slot) || isRunning("extra", slot))) stopAll();
     var ln = lenOf(slot);
     if(x.done){ x.done = false; if(x.timer>=ln) x.timer = 0; }
     else { x.done = true; if(x.timer < ln) x.timer = ln; }
     save(); render(); return;
   }
   if(act==="herz"){
-    var dd = getDay(todayKey(), true), n = +b.getAttribute("data-n");
+    var hk = b.getAttribute("data-day") || todayKey();
+    var dd = getDay(hk, true), n = +b.getAttribute("data-n");
     dd.herz = (dd.herz===n) ? 0 : n;
     save(); render(); return;
   }
