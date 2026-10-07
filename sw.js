@@ -2,7 +2,7 @@
    Gebetszeiten liegen im localStorage des Geräts und werden hier nicht angefasst.
    Der Abgleich mit Cloudflare läuft am Cache vorbei. */
 
-const CACHE = "gebetstimer-v3";
+const CACHE = "gebetstimer-v4";
 const CORE = [
   "./",
   "./index.html",

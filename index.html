@@ -443,6 +443,11 @@ function setLen(slotId, sec){
   data.settings.len[slotId] = Math.max(LEN_MIN, Math.min(LEN_MAX, sec));
 }
 
+function touchDay(k){
+  var d = getDay(k, true);
+  d.u = Date.now();
+}
+
 function dayTotal(d){
   var t = d.spontan||0;
   SLOTS.forEach(function(s){
@@ -485,6 +490,7 @@ function commit(){
     if(v >= len){
       d[r.slot].timer = len;
       d[r.slot].done = true;
+      d.u = Date.now();
       data.running = null;
       save();
       chime();
@@ -492,6 +498,7 @@ function commit(){
     }
     d[r.slot].timer = v;
   }
+  d.u = Date.now();
   r.base = v;
   r.startedAt = Date.now();
   return false;
@@ -577,6 +584,19 @@ function mergeInto(remote){
     var inc = normalize(rd[k] || {});
     if(!data.days[k]){ data.days[k] = inc; out.added++; out.changed = true; return; }
     var cur = getDay(k, true), touched = false;
+    var ru = typeof inc.u === "number" ? inc.u : 0;
+    var lu = typeof cur.u === "number" ? cur.u : 0;
+    var busy = data.running && data.running.dateKey === k;
+
+    if(!busy && (ru || lu)){
+      // Beide Seiten sind datiert: der jüngere Stand gilt, damit auch
+      // abgezogene Minuten bestehen bleiben.
+      if(ru > lu){ data.days[k] = inc; out.updated++; out.changed = true; }
+      else out.kept++;
+      return;
+    }
+
+    // Altbestand ohne Zeitstempel (oder laufende Uhr): das Längere gewinnt.
     SLOTS.forEach(function(sl){
       if(inc[sl.id].timer > cur[sl.id].timer){ cur[sl.id].timer = inc[sl.id].timer; touched = true; }
       if(inc[sl.id].extra > cur[sl.id].extra){ cur[sl.id].extra = inc[sl.id].extra; touched = true; }
@@ -584,7 +604,7 @@ function mergeInto(remote){
     });
     if(inc.spontan > cur.spontan){ cur.spontan = inc.spontan; touched = true; }
     if(inc.herz > cur.herz){ cur.herz = inc.herz; touched = true; }
-    if(touched){ out.updated++; out.changed = true; } else out.kept++;
+    if(touched){ cur.u = Date.now(); out.updated++; out.changed = true; } else out.kept++;
   });
   var rAt = typeof remote.settingsAt === "number" ? remote.settingsAt : 0;
   var lAt = typeof data.settingsAt === "number" ? data.settingsAt : 0;
@@ -602,6 +622,7 @@ function normalize(d){
     var x = d[s.id] || {};
     o[s.id] = {timer:(typeof x.timer==="number"?x.timer:0), extra:(typeof x.extra==="number"?x.extra:0), done:!!x.done};
   });
+  if(typeof d.u === "number") o.u = d.u;
   return o;
 }
 
@@ -1055,7 +1076,7 @@ function viewVerlauf(){
       + '<section class="jump">'
     + '<label class="jump-lbl" for="dateJump">Tag nachtragen</label>'
     + '<div class="jump-row">'
-    +   '<input class="set-input" type="date" id="dateJump" max="'+todayKey()+'" value="'+yesterdayKey()+'">'
+    +   '<input class="set-input" type="date" id="dateJump" data-field="jump" max="'+todayKey()+'" value="'+(jumpDate||yesterdayKey())+'">'
     +   '<button class="btn small" data-act="opendate">Öffnen</button>'
     + '</div>'
     + '</section>'
@@ -1078,7 +1099,7 @@ function viewVerlauf(){
     + '<section class="jump">'
     + '<label class="jump-lbl" for="dateJump">Tag nachtragen</label>'
     + '<div class="jump-row">'
-    +   '<input class="set-input" type="date" id="dateJump" max="'+todayKey()+'" value="'+yesterdayKey()+'">'
+    +   '<input class="set-input" type="date" id="dateJump" data-field="jump" max="'+todayKey()+'" value="'+(jumpDate||yesterdayKey())+'">'
     +   '<button class="btn small" data-act="opendate">Öffnen</button>'
     + '</div>'
     + '</section>';
@@ -1115,6 +1136,7 @@ function viewVerlauf(){
 
 /* ============ Steuerung ============ */
 var settingsOpen = false;
+var jumpDate = "";
 var app = document.getElementById("app");
 function route(){
   var h = location.hash.replace(/^#\/?/, "");
@@ -1147,8 +1169,15 @@ document.addEventListener("click", function(e){
 
   if(act==="opendate"){
     var fld = document.getElementById("dateJump");
-    var val = fld && fld.value;
-    if(/^\d{4}-\d{2}-\d{2}$/.test(val) && val <= todayKey()) location.hash = "#/tag/"+val;
+    var val = (fld && fld.value) || jumpDate;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(val) && val <= todayKey()){
+      jumpDate = val;
+      if(location.hash === "#/tag/"+val) render();
+      else location.hash = "#/tag/"+val;
+      try{ window.scrollTo(0, 0); }catch(e){}
+    } else if(fld){
+      fld.focus();
+    }
     return;
   }
   if(act==="settings"){ settingsOpen = !settingsOpen; render(); return; }
@@ -1199,6 +1228,7 @@ document.addEventListener("click", function(e){
     var cur = (kd==="spontan") ? (dy.spontan||0) : (dy[sk][kd]||0);
     var next = act==="zero" ? 0 : (act==="minus" ? cur-step : cur+step);
     if(next < 0) next = 0;
+    dy.u = Date.now();
     if(kd==="timer"){
       var lim = lenOf(sk);
       if(next > lim) next = lim;
@@ -1220,12 +1250,14 @@ document.addEventListener("click", function(e){
     var ln = lenOf(slot);
     if(x.done){ x.done = false; if(x.timer>=ln) x.timer = 0; }
     else { x.done = true; if(x.timer < ln) x.timer = ln; }
+    d.u = Date.now();
     save(); render(); return;
   }
   if(act==="herz"){
     var hk = b.getAttribute("data-day") || todayKey();
     var dd = getDay(hk, true), n = +b.getAttribute("data-n");
     dd.herz = (dd.herz===n) ? 0 : n;
+    dd.u = Date.now();
     save(); render(); return;
   }
 });
@@ -1234,6 +1266,7 @@ document.addEventListener("input", function(e){
   var el = e.target.closest ? e.target.closest("[data-field]") : null;
   if(!el) return;
   var f = el.getAttribute("data-field"), sl = el.getAttribute("data-slot");
+  if(f === "jump"){ jumpDate = el.value; return; }
   if(f === "sync-url"){ sync.url = el.value.trim(); saveSync(); return; }
   if(f === "sync-token"){ sync.token = el.value; saveSync(); return; }
   if(!data.settings) data.settings = {};
@@ -1250,7 +1283,10 @@ if(importInput){
   });
 }
 
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", function(){
+  render();
+  try{ window.scrollTo(0, 0); }catch(e){}
+});
 
 var ticks = 0;
 setInterval(function(){
